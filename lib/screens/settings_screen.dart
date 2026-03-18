@@ -40,6 +40,23 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ],
               ),
+              // 电池优化（华为/荣耀）
+              if (appState.isBatteryOptimized)
+                _buildSection(
+                  context,
+                  title: '后台保活',
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.battery_alert, color: Colors.orange),
+                      title: const Text('关闭电池优化'),
+                      subtitle: const Text('荣耀手机需关闭电池优化，否则后台监听会被系统杀死'),
+                      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                      onTap: () async {
+                        await appState.requestIgnoreBatteryOptimization();
+                      },
+                    ),
+                  ],
+                ),
               // 云端同步
               _buildSection(
                 context,

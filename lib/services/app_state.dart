@@ -19,6 +19,7 @@ class AppState extends ChangeNotifier {
   Map<String, double> _categoryStats = {};
   bool _isListening = false;
   bool _isSyncing = false;
+  bool _isBatteryOptimized = true;
   StreamSubscription? _notificationSubscription;
 
   AppState({
@@ -38,12 +39,48 @@ class AppState extends ChangeNotifier {
   Map<String, double> get categoryStats => _categoryStats;
   bool get isListening => _isListening;
   bool get isSyncing => _isSyncing;
+  bool get isBatteryOptimized => _isBatteryOptimized;
 
-  /// 初始化：加载数据并开始监听
+  /// 初始化：加载数据、处理待处理通知、开始实时监听
   Future<void> initialize() async {
     await loadTransactions();
     await loadMonthlyStats();
+    await _checkBatteryOptimization();
+    await _processPendingNotifications();
     await startListening();
+  }
+
+  /// 检查电池优化状态
+  Future<void> _checkBatteryOptimization() async {
+    _isBatteryOptimized =
+        !await _notificationService.isBatteryOptimizationIgnored();
+    notifyListeners();
+  }
+
+  /// 处理 App 不在前台时积累的待处理通知
+  Future<void> _processPendingNotifications() async {
+    try {
+      final pendingList = await _notificationService.getPendingNotifications();
+      debugPrint('发现 ${pendingList.length} 条待处理通知');
+
+      int processed = 0;
+      for (final data in pendingList) {
+        final parsed = _parser.parse(data);
+        if (parsed != null) {
+          final transaction = parsed.toTransaction();
+          await _dbService.insertTransaction(transaction);
+          processed++;
+        }
+      }
+
+      if (processed > 0) {
+        debugPrint('已处理 $processed 条支付通知');
+        await loadTransactions();
+        await loadMonthlyStats();
+      }
+    } catch (e) {
+      debugPrint('处理待处理通知出错: $e');
+    }
   }
 
   /// 加载交易记录
@@ -60,7 +97,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 开始监听支付通知
+  /// 开始实时监听支付通知（App 在前台时）
   Future<void> startListening() async {
     _isListening = await _notificationService.isNotificationListenerEnabled();
     if (!_isListening) {
@@ -79,7 +116,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 处理支付通知
+  /// 处理实时支付通知
   Future<void> _onPaymentNotification(Map<String, dynamic> data) async {
     final parsed = _parser.parse(data);
     if (parsed == null) return;
@@ -97,7 +134,7 @@ class AppState extends ChangeNotifier {
     await loadMonthlyStats();
   }
 
-  /// 更新交易记录（修改分类或备注）
+  /// 更新交易记录
   Future<void> updateTransaction(Transaction transaction) async {
     await _dbService.updateTransaction(transaction);
     await loadTransactions();
@@ -146,6 +183,11 @@ class AppState extends ChangeNotifier {
   /// 打开通知监听设置
   Future<void> openNotificationSettings() async {
     await _notificationService.openNotificationListenerSettings();
+  }
+
+  /// 请求关闭电池优化
+  Future<void> requestIgnoreBatteryOptimization() async {
+    await _notificationService.requestIgnoreBatteryOptimization();
   }
 
   /// 按日期范围获取交易记录

@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
+import android.net.Uri
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -25,7 +27,6 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // MethodChannel: 用于检查权限和跳转设置
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isNotificationListenerEnabled" -> {
@@ -35,11 +36,22 @@ class MainActivity : FlutterActivity() {
                     openNotificationListenerSettings()
                     result.success(true)
                 }
+                "getPendingNotifications" -> {
+                    // 从 SharedPreferences 拉取待处理通知
+                    val pending = PaymentNotificationService.consumePendingNotifications(this)
+                    result.success(pending)
+                }
+                "requestIgnoreBatteryOptimization" -> {
+                    requestIgnoreBatteryOptimization()
+                    result.success(true)
+                }
+                "isBatteryOptimizationIgnored" -> {
+                    result.success(isBatteryOptimizationIgnored())
+                }
                 else -> result.notImplemented()
             }
         }
 
-        // EventChannel: 用于实时推送支付通知到 Flutter
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL).setStreamHandler(
             object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -55,25 +67,38 @@ class MainActivity : FlutterActivity() {
         )
     }
 
-    /**
-     * 检查通知监听权限是否已开启
-     */
     private fun isNotificationListenerEnabled(): Boolean {
         val enabledListeners = NotificationManagerCompat.getEnabledListenerPackages(this)
         return enabledListeners.contains(packageName)
     }
 
-    /**
-     * 跳转到通知监听设置页面
-     */
     private fun openNotificationListenerSettings() {
-        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-        startActivity(intent)
+        startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
     }
 
     /**
-     * 注册广播接收器，接收来自 PaymentNotificationService 的支付通知
+     * 请求忽略电池优化（华为/荣耀手机必需）
      */
+    private fun requestIgnoreBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            }
+        }
+    }
+
+    private fun isBatteryOptimizationIgnored(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            return pm.isIgnoringBatteryOptimizations(packageName)
+        }
+        return true
+    }
+
     private fun registerPaymentReceiver() {
         if (paymentReceiver != null) return
 
